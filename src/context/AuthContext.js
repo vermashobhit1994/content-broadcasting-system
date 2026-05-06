@@ -1,60 +1,84 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 
-const AuthContext = createContext();
+const AuthContext = createContext({});
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const router = useRouter();
 
-  // Persist user session on mount
   useEffect(() => {
-    const storedUser = localStorage.getItem('user');
-    if (storedUser) {
-      setUser(JSON.parse(storedUser));
-    }
-    setIsLoading(false);
-  }, []);
-
-  /**
-   * Simulated Login Logic
-   * Section 8 requirement: Role-based access control (RBAC)
-   */
-  const login = async (email, password) => {
-    // Artificial delay to simulate API call for UI loading states
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-
-    // Determine role: Email containing 'admin' is Principal, else Teacher
-    const role = email.toLowerCase().includes('admin') ? 'principal' : 'teacher';
-    
-    const userData = {
-      email,
-      role,
-      token: "mock-jwt-token-12345",
+    const getSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      setUser(session?.user ?? null);
+      setLoading(false);
     };
 
-    setUser(userData);
-    localStorage.setItem('user', JSON.stringify(userData));
-    return userData; // Return data so the UI can redirect immediately
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      setLoading(false);
+    });
+
+    getSession();
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  // Registration Logic
+  const signUp = async (email, password, role) => {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { role: role }, // Attach role to metadata
+      },
+    });
+
+    if (error) {
+      toast.error(error.message);
+      throw error;
+    }
+    toast.success("Account created! Check email if confirmation is on.");
+    return data;
   };
 
-  const logout = () => {
-    setUser(null);
-    localStorage.removeItem('user');
+  // Login with Redirect
+  const login = async (email, password) => {
+    // .trim() removes accidental spaces at the beginning or end of the email
+  const cleanEmail = email.trim();
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: cleanEmail,
+      password,
+    });
+
+    if (error) {
+      toast.error("Auth Error: " + error.message);
+      throw error;
+    }
+
+    // Direct redirection based on GoTrue metadata
+    const role = data.user?.user_metadata?.role;
+    if (role === "teacher") router.push("/teacher");
+    else if (role === "principal") router.push("/principal");
+    else router.push("/");
+  };
+
+  const logout = async () => {
+    await supabase.auth.signOut();
+    toast.success("Signed out");
+    router.push("/"); // Redirect to home on signout
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, isLoading }}>
-      {!isLoading && children}
+    <AuthContext.Provider value={{ user, login, logout, signUp, loading }}>
+      {!loading && children}
     </AuthContext.Provider>
   );
 };
 
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error("useAuth must be used within an AuthProvider");
-  }
-  return context;
-};
+export const useAuth = () => useContext(AuthContext);
