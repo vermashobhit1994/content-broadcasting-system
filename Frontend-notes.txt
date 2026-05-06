@@ -1,0 +1,14 @@
+Architecture 
+Clean architecture using services/ for API abstraction. This allows switching from mock data to real Axios calls by editing one file.
+
+Routing
+Protected routes are managed via AuthContext. If a user is not logged in or lacks the correct role, they are redirected.
+
+State management
+Local component state for UI-specific data (modals, inputs) and AuthContext for user session.
+
+Performance
+Tables use simple mapping for current requirements, but are structured to support virtualization if the list grows to 1000+ items.
+
+Assumptions
+I assumed a mock delay for the Service Layer to demonstrate loading states (Spinners/Skeletons) as requested.
