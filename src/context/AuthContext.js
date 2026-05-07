@@ -4,81 +4,120 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { AuthService } from "@/services/auth.service";
 
 const AuthContext = createContext({});
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const router = useRouter();
+    const [user, setUser] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const router = useRouter();
 
-  useEffect(() => {
-    const getSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setUser(session?.user ?? null);
-      setLoading(false);
+    useEffect(() => {
+        // ----------------- initial session check -------------------------
+        const initializeAuth = async () => {
+            const {data, error} = await supabase.auth.getSession();
+            setUser(data.session?.user ?? null);
+            setLoading(false);
+        };
+        //-------------------------------------------------------------------
+
+        // global listner for auth changes
+        const { data: listener } = supabase.auth.onAuthStateChange(
+            (_event, session) => {
+                setUser(session?.user ?? null);
+                setLoading(false);
+            },
+        );
+
+        initializeAuth();
+        return () => listener.subscription.unsubscribe();
+    }, []);
+
+    /**
+     * AUTHENTICATION: registration
+     * @param {*} email
+     * @param {*} password
+     * @param {*} role
+     * @returns
+     */
+    const signUp = async (email, password, role) => {
+        try {
+            const data = await AuthService.register(email, password, role);
+            toast.success("Registration successful!");
+            return data;
+        } catch (error) {
+            toast.error(error.message);
+            throw error;
+        }
     };
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
+    /**
+     * AUTHENTICATION & AUTHORIZATION: Login
+     */
+    const login = async (email, password) => {
+        try {
+            const data = await AuthService.login(email, password);
+            
+            // AUTHORIZATION: Extract role from JWT metadata
+            const role = data.user?.user_metadata?.role;
 
-    getSession();
-    return () => listener.subscription.unsubscribe();
-  }, []);
 
-  // Registration Logic
-  const signUp = async (email, password, role) => {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { role: role }, // Attach role to metadata
-      },
-    });
+            if (!role) {
+                toast.error("No role assigned to this user.");
+                return;
+            }
+            // 2. Add a very slight delay or use 'replace' to force Next.js to re-evaluate
+            // This ensures the cookies are set before the redirect happens
+            toast.success(`Logging in as ${role}...`);
 
-    if (error) {
-      toast.error(error.message);
-      throw error;
-    }
-    toast.success("Account created! Check email if confirmation is on.");
-    return data;
-  };
 
-  // Login with Redirect
-  const login = async (email, password) => {
-    // .trim() removes accidental spaces at the beginning or end of the email
-  const cleanEmail = email.trim();
+            if (role === "teacher") {
+              // window.location.href="/teacher"
+                // router.push("/test");
+                router.push("/teacher")
+                // toast.success("Welcom teacher");
+            } else if (role === "principal") {
+              // window.location.href="/principal"
+                router.push("/principal");
+                // toast.success("Welcome principal");
+            } else {
+                router.push("/");
+            }
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: cleanEmail,
-      password,
-    });
+            return data;
+        } catch (error) {
+            toast.error("Authentication failed: " + error.message);
+            throw error;
+        }
+    };
 
-    if (error) {
-      toast.error("Auth Error: " + error.message);
-      throw error;
-    }
+    /**
+     * AUTHENTICATION: Logout
+     */
+    const logout = async () => {
+        try {
+            await AuthService.logout();
+            toast.success("Signed out");
+            router.push("/");
+        } catch (error) {
+            toast.error("Error signing out");
+        }
+    };
 
-    // Direct redirection based on GoTrue metadata
-    const role = data.user?.user_metadata?.role;
-    if (role === "teacher") router.push("/teacher");
-    else if (role === "principal") router.push("/principal");
-    else router.push("/");
-  };
+    /**
+     * HELPER: Check Authorization
+     * Usage: checkRole('principal') returns true/false
+     */
+    const checkRole = (requiredRole) => {
+        return user?.user_metadata?.role === requiredRole;
+    };
 
-  const logout = async () => {
-    await supabase.auth.signOut();
-    toast.success("Signed out");
-    router.push("/"); // Redirect to home on signout
-  };
-
-  return (
-    <AuthContext.Provider value={{ user, login, logout, signUp, loading }}>
-      {!loading && children}
-    </AuthContext.Provider>
-  );
+    return (
+        <AuthContext.Provider value={{ user, login, logout, signUp, loading }}>
+            {!loading && children}
+        </AuthContext.Provider>
+    );
 };
 
 export const useAuth = () => useContext(AuthContext);

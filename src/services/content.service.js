@@ -1,4 +1,5 @@
 // src/services/content.service.js
+import {ApprovalService} from "./approval.service";
 
 // Simulated API delay to handle loading states in the UI
 const mockDelay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -47,7 +48,14 @@ export const ContentService = {
    */
   uploadContent: async (formData) => {
     await mockDelay(1200);
-    console.log("Service received upload:", formData);
-    return { success: true };
+    // After getting the file_url, we delegate the database/notification logic
+    return await ApprovalService.sendToPrincipal({
+      title: payload.title,
+      subject: payload.subject,
+      start_time: payload.startTime,
+      end_time: payload.endTime,
+      file_url: payload.file_url,
+      teacher_email: payload.teacher_email
+    });
   }
 };

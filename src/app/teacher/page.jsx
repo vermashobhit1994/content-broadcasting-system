@@ -1,6 +1,18 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import DashboardHeader from "./DashboardHeader/ui/DashboardHeader";
+import StatsSummary from "./StatsSummary/ui/StatsSummary";
+import LectureTitle from "./UploadContentTab/ui/LectureTitle";
+import SubjectName from "./UploadContentTab/ui/SubjectName";
+import StartEndTime from "./UploadContentTab/ui/StartEndTime";
+import PublishContentButton from "./UploadContentTab/ui/PublishContentButton";
+import MediaPreview from "./UploadContentTab/ui/MediaPreview"
+import SubjectDescription from "./UploadContentTab/ui/SubjectDescription"
+import RotationDuration from "./UploadContentTab/ui/RotationDuration"
+
+import { supabase } from "@/lib/supabase";
+
+import { useState, useEffect,useRef } from "react";
 import { useRouter } from "next/navigation"; // Added for redirection
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -39,18 +51,27 @@ const uploadSchema = z.object({
   path: ["endTime"],
 });
 
-export default function TeacherPage() {
+
+
+export default function TeacherDashboard() {
   const { user, logout } = useAuth();
   const router = useRouter(); // Initialize router
   const [stats, setStats] = useState({ total: 0, pending: 0, approved: 0, rejected: 0 });
-  const [file, setFile] = useState(null);
-  const [preview, setPreview] = useState(null);
-  const [showPdfPreview, setShowPdfPreview] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+
+
+
+  const [file, setFile] = useState(null);
+  const [preview, setPreview] = useState("");
+  const [showPdfPreview, setShowPdfPreview] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef(null);
+
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm({
     resolver: zodResolver(uploadSchema),
-    defaultValues: { startTime: "09:00:00", endTime: "10:00:00" }
+    defaultValues: { startTime: "09:00:00", endTime: "10:00:00" },
+    mode: "onSubmit"
   });
 
   // Dedicated Logout Handler
@@ -81,68 +102,179 @@ export default function TeacherPage() {
     fetchStats();
   }, []);
 
-  const handleFileChange = (e) => {
-    const selectedFile = e.target.files[0];
-    if (!selectedFile) return;
-
-    const validTypes = ["image/jpeg", "image/png", "image/gif", "application/pdf"];
-    if (!validTypes.includes(selectedFile.type)) {
-      toast.error("Upload JPG, PNG, GIF, or PDF only.");
-      return;
-    }
-
-    setFile(selectedFile);
-    setPreview(URL.createObjectURL(selectedFile));
-    if (selectedFile.type === "application/pdf") setShowPdfPreview(false);
-  };
-
   const clearFile = () => {
     setFile(null);
-    if (preview) URL.revokeObjectURL(preview);
-    setPreview(null);
-    setShowPdfPreview(false);
+    setPreview("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
+  // 2. Define the reset logic
+const handleFormReset = () => {
+  // Reset react-hook-form fields (title, description, etc.)
+  reset(); 
+
+  // Reset local state
+  setFile(null);
+  setPreview(""); 
+  if (typeof setShowPdfPreview === "function") {
+    setShowPdfPreview(false);
+  }
+
+  // CRITICAL: Reset the actual HTML input value
+  // If you don't do this, you can't re-upload the same file twice in a row
+  if (fileInputRef.current) {
+    fileInputRef.current.value = "";
+  }
+};
+
   const onSubmit = async (data) => {
-    if (!file) return toast.error("File is required.");
-    setIsUploading(true);
-    try {
-      await ContentService.uploadContent({ ...data, file });
-      toast.success("Submitted successfully!");
-      reset();
-      clearFile();
-    } catch (error) {
-      toast.error("Upload failed.");
-    } finally {
-      setIsUploading(false);
+  if (!file) return toast.error("Please select a file first.");
+  
+  setIsUploading(true);
+  try {
+    // 1. Generate a Clean, Unique File Name
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Math.random().toString(36).substring(2)}-${Date.now()}.${fileExt}`;
+    const filePath = `${user.id}/${fileName}`; // Organized by user folder
+
+    // 2. Upload to Supabase Storage
+    const { data: storageData, error: storageError } = await supabase.storage
+      .from("broadcasts") // Ensure this bucket exists and is public
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: false
+      });
+
+    if (storageError) {
+      console.error("Storage Error Detail:", storageError);
+      throw new Error(`Storage Upload Failed: ${storageError.message}`);
     }
-  };
+
+    // 3. Get the Public URL
+    const { data: { publicUrl } } = supabase.storage
+      .from("broadcasts")
+      .getPublicUrl(filePath);
+
+    // 4. Insert Metadata into Database
+    // Note: We combine form 'data' (title, duration) with 'publicUrl'
+    const { error: dbError } = await supabase
+      .from("submissions")
+      .insert([
+        {
+          title: data.title,
+          description: data.description,
+          duration: parseInt(data.duration), // Ensure it's a number
+          file_url: publicUrl,
+          file_name: file.name,
+          teacher_email: user.email,
+          status: "pending",
+        },
+      ]);
+
+    if (dbError) {
+      console.error("Database Error Detail:", dbError);
+      throw new Error(`Database Record Creation Failed: ${dbError.message}`);
+    }
+
+    // 5. Success UI Update
+    toast.success("Content submitted for review!");
+    setTimeout(() => {
+      handleFormReset();
+    }, 100);
+    handleFormReset(); // Clears form and file states
+    
+  } catch (error) {
+    console.error("Submission Catch Block:", error);
+    toast.error(error.message || "An unexpected error occurred.");
+  } finally {
+    setIsUploading(false);
+  }
+};
+
+  
+//     const onSubmitForm = async (data) => {
+//       console.log("hello")
+//         if (!file) return toast.error("File is required.");
+//         setIsUploading(true);
+//         // 1. Generate a Clean, Unique File Name
+//     const fileExt = file.name.split('.').pop();
+//     const fileName = `${Math.random().toString(36).substring(2)}-${Date.now()}.${fileExt}`;
+//     const filePath = `${user.id}/${fileName}`; // Organized by user folder
+
+//     // 2. Upload to Supabase Storage
+//     const { data: storageData, error: storageError } = await supabase.storage
+//       .from("broadcasts") // Ensure this bucket exists and is public
+//       .upload(filePath, file, {
+//         cacheControl: '3600',
+//         upsert: false
+//       });
+//       if (storageError) {
+//       console.error("Storage Error Detail:", storageError);
+//       throw new Error(`Storage Upload Failed: ${storageError.message}`);
+//     }
+//     // 3. Get the Public URL
+//     const { data: { publicUrl } } = supabase.storage
+//       .from("broadcasts")
+//       .getPublicUrl(filePath);
+
+    
+//       // 4. Insert Metadata into Database
+//     // Note: We combine form 'data' (title, duration) with 'publicUrl'
+//     const { error: dbError } = await supabase
+//       .from("submissions")
+//       .insert([
+//         {
+//           title: data.title,
+//           description: data.description,
+//           duration: parseInt(data.duration), // Ensure it's a number
+//           file_url: publicUrl,
+//           file_name: file.name,
+//           teacher_email: user.email,
+//           status: "pending",
+//         },
+//       ]);
+
+//     if (dbError) {
+//       console.error("Database Error Detail:", dbError);
+//       throw new Error(`Database Record Creation Failed: ${dbError.message}`);
+//     }
+
+//     // 5. Success UI Update
+//     toast.success("Content submitted for review!");
+//     handleFormReset(); // Clears form and file states
+
+//     } catch (error) {
+//     console.error("Submission Catch Block:", error);
+//     toast.error(error.message || "An unexpected error occurred.");
+//   } finally {
+//     setIsUploading(false);
+//   }
+// }
+    
+      //   try {
+      //     await ContentService.uploadContent({ ...data, file });
+      //     toast.success("Submitted successfully!");
+      //     reset();
+      //     clearFile();
+      //   } catch (error) {
+      //     toast.error("Upload failed.");
+      //   } finally {
+      //     setIsUploading(false);
+      //   }
+      // };
+      // console.log("validation errors", errors)
+
+ 
+  
+
 
   return (
     <div className="p-8 max-w-6xl mx-auto space-y-8">
       {/* Dashboard Header with Logout */}
-      <header className="flex justify-between items-center bg-white p-6 rounded-2xl border shadow-sm">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight text-slate-900">Teacher Dashboard</h1>
-          <p className="text-sm text-muted-foreground">Signed in as: <span className="font-medium">{user?.email}</span></p>
-        </div>
-        <Button 
-          variant="outline" 
-          className="text-red-600 hover:bg-red-50 hover:text-red-700 border-red-100 gap-2 px-4"
-          onClick={handleLogout} // Trigger logout functionality
-        >
-          <LogOut size={18} />
-          <span className="font-semibold">Logout</span>
-        </Button>
-      </header>
+      <DashboardHeader handleLogout={handleLogout} user={user} />
 
       {/* Stats Summary Section */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <StatCard title="Total" value={stats.total} icon={<FileText size={18}/>} />
-        <StatCard title="Pending" value={stats.pending} icon={<Clock size={18}/>} color="text-yellow-600" />
-        <StatCard title="Approved" value={stats.approved} icon={<CheckCircle size={18}/>} color="text-green-600" />
-        <StatCard title="Rejected" value={stats.rejected} icon={<XCircle size={18}/>} color="text-red-600" />
-      </div>
+      <StatsSummary stats={stats}/>
 
       <Tabs defaultValue="upload">
         <TabsList className="mb-4">
@@ -162,86 +294,33 @@ export default function TeacherPage() {
                   
                   {/* Form Inputs */}
                   <div className="space-y-4">
-                    <div className="space-y-2">
-                      <Label>Title</Label>
-                      <Input {...register("title")} placeholder="Lecture Title" />
-                      {errors.title && <p className="text-red-500 text-xs">{errors.title.message}</p>}
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Subject</Label>
-                      <Input {...register("subject")} placeholder="e.g. Mathematics" />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label>Start (HH:mm:ss)</Label>
-                        <Input type="time" step="1" {...register("startTime")} />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>End (HH:mm:ss)</Label>
-                        <Input type="time" step="1" {...register("endTime")} />
-                      </div>
-                    </div>
+                    <LectureTitle register={register} errors={errors}/>
+                    <SubjectName register={register}/>
+                    <SubjectDescription register={register}/>
+                    <StartEndTime register={register}/>
+                    <RotationDuration field={""} control={""}/>
                   </div>
 
                   {/* File Upload, Preview, and Removal Controls */}
-                  <div className="space-y-4">
-                    <Label>Media Preview</Label>
+                    <MediaPreview 
+                          showPdfPreview={showPdfPreview} 
+                          file={file}
+                          setFile={setFile}
+                          preview={preview}
+                          setPreview={setPreview}
+                          setShowPdfPreview={setShowPdfPreview}
+                          
+                          isUploading={isUploading}
+                          setIsUploading={setIsUploading}
+                          isDragging={isDragging}
+                          setIsDragging={setIsDragging}
+                          clearFile={clearFile}
+                          fileInputRef={fileInputRef}
+                          
+                    />  
                     
-                    {!file ? (
-                      <div className="border-2 border-dashed rounded-xl p-12 flex flex-col items-center justify-center bg-slate-50 hover:bg-slate-100 transition-all cursor-pointer relative">
-                        <Input type="file" id="file-upload" className="absolute inset-0 opacity-0 cursor-pointer" accept="image/*,.pdf" onChange={handleFileChange} />
-                        <Upload className="h-8 w-8 text-indigo-600 mb-2" />
-                        <span className="font-semibold text-slate-700 text-center">Click to select or drag and drop</span>
-                        <span className="text-xs text-slate-500">PDF, JPG, or PNG (Max 10MB)</span>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {/* Top Action Bar for PDF Controls */}
-                        <div className="flex items-center justify-between p-2 bg-slate-100 rounded-lg border">
-                          <div className="flex items-center gap-2 text-xs font-medium text-slate-600 truncate max-w-[150px]">
-                            <FileIcon size={14} /> {file.name}
-                          </div>
-                          <div className="flex gap-2">
-                            {file.type === "application/pdf" && (
-                              <Button 
-                                type="button" 
-                                variant="outline" 
-                                size="sm" 
-                                className="h-8 gap-2 bg-white"
-                                onClick={() => setShowPdfPreview(!showPdfPreview)} // Preview PDF button
-                              >
-                                {showPdfPreview ? <EyeOff size={14} /> : <Eye size={14} />}
-                                {showPdfPreview ? "Hide" : "Preview"}
-                              </Button>
-                            )}
-                            <Button 
-                              type="button" 
-                              variant="destructive" 
-                              size="sm" 
-                              className="h-8 px-2"
-                              onClick={clearFile} // Dedicated delete button
-                            >
-                              <Trash2 size={14} />
-                            </Button>
-                          </div>
-                        </div>
-                        
-                        <div className="rounded-lg overflow-hidden border bg-white shadow-inner">
-                          {file.type === "application/pdf" ? (
-                            showPdfPreview && (
-                              <iframe src={preview} className="w-full h-[400px]" title="PDF Viewer" />
-                            )
-                          ) : (
-                            <img src={preview} alt="Preview" className="w-full h-auto max-h-[400px] object-contain p-2 mx-auto" />
-                          )}
-                        </div>
-                      </div>
-                    )}
                     
-                    <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 h-12" disabled={isUploading || !file}>
-                      {isUploading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Uploading...</> : "Publish Content"}
-                    </Button>
-                  </div>
+                  
                 </div>
               </form>
             </CardContent>
@@ -252,16 +331,3 @@ export default function TeacherPage() {
   );
 }
 
-function StatCard({ title, value, icon, color = "" }) {
-  return (
-    <Card className="bg-white border-slate-200 shadow-sm">
-      <CardHeader className="flex flex-row items-center justify-between pb-1 space-y-0">
-        <CardTitle className="text-xs font-bold text-slate-400 uppercase tracking-tight">{title}</CardTitle>
-        <div className="text-slate-300">{icon}</div>
-      </CardHeader>
-      <CardContent>
-        <div className={`text-2xl font-extrabold ${color}`}>{value}</div>
-      </CardContent>
-    </Card>
-  );
-}
