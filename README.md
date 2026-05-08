@@ -1,7 +1,11 @@
-# content-broadcasting-system
-broadcasting system for school for principal, teachers and students
+# Introduction 
+This is content broadcasting system for school with below requirements
+1. Login and Logout for teacher and principal with authentication and authorisation.
+2. uploading content for teacher and approving by principal.
+3. live checking of broadcast content for students by teacher and principal.
+4. dashboard for teacher and principal.
 
-# live deployment checkout
+# live deployment checkout link
 [content broadcasting system](https://content-broadcasting.netlify.app/)
 
 # How to setup locally
