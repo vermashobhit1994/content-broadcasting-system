@@ -56,8 +56,12 @@ export const AuthProvider = ({ children }) => {
      * AUTHENTICATION & AUTHORIZATION: Login
      */
     const login = async (email, password) => {
+        let data;
         try {
-            const data = await AuthService.login(email, password);
+            data = await AuthService.login(email, password);
+            if(!data.user){
+                toast.error("no user account exists");
+            }
             
             // AUTHORIZATION: Extract role from JWT metadata
             const role = data.user?.user_metadata?.role;
@@ -87,7 +91,8 @@ export const AuthProvider = ({ children }) => {
 
             return data;
         } catch (error) {
-            toast.error("Authentication failed: " + error.message);
+            console.log(error);
+            toast.error(`${error.message}`);
             throw error;
         }
     };

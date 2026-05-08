@@ -78,7 +78,7 @@ export default function TeacherDashboard() {
   const handleLogout = async () => {
     try {
       await logout(); // Execute auth logic
-      toast.success("Logged out successfully");
+      toast.success("Signed out successfully");
       router.push("/"); // Redirect to homepage
     } catch (error) {
       toast.error("Logout failed");

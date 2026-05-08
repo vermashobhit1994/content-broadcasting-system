@@ -77,7 +77,7 @@ export default function AuthPage() {
               <Input 
                 id="password" 
                 type="password" 
-                placeholder="••••••••"
+                placeholder="Enter your password"
                 required 
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}

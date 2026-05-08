@@ -30,7 +30,6 @@ export default function UploadForm() {
   };
 
   const onSubmit = async (data) => {
-    console.log("Form Data:", data);
     // Call ContentService.uploadContent here
   };
 
